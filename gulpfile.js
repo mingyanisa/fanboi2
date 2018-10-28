@@ -1,9 +1,9 @@
+"use strict";
+
 var gulp = require("gulp");
-var sourcemaps = require("gulp-sourcemaps");
 var concat = require("gulp-concat");
 var es = require("event-stream");
 
-var sass = require("gulp-sass");
 var postcss = require("gulp-postcss");
 
 var uglify = require("gulp-uglify");
@@ -13,45 +13,30 @@ var browserify = require("browserify");
 var tsify = require("tsify");
 
 /* Settings
- * ---------------------------------------------------------------------- */
+ * ----------------------------------------------------------------------------------- */
 
 var paths = {
     /* Path for storing application-specific assets. */
     app: {
-        assets: "assets/app/assets/*",
-        stylesheets: [
-            "assets/app/stylesheets/app.scss",
-            "assets/app/stylesheets/*.scss",
-            "assets/app/stylesheets/themes/*.scss",
-        ],
-        javascripts: {
-            glob: "assets/app/javascripts/**/*.ts",
-            base: "assets/app/javascripts/",
-            entry: "assets/app/javascripts/app.ts",
+        assets: {
+            base: "assets/assets",
+            glob: "assets/assets/*",
+            entries: [
+                "assets/assets/icon.ico",
+                "assets/assets/icon.png",
+                "assets/assets/touch-icon.png",
+            ],
         },
-    },
-
-    /* Path for storing admin-specific assets. */
-    admin: {
-        assets: "assets/admin/assets/*",
-        stylesheets: [
-            "assets/admin/stylesheets/*.scss",
-            "assets/admin/stylesheets/themes/*.scss",
-        ],
-    },
-
-    /* Path for storing third-party assets. */
-    vendor: {
-        assets: "assets/vendor/assets/*",
-        stylesheets: "assets/vendor/stylesheets/**/*.css",
-        javascripts: ["assets/vendor/javascripts/**/*.js"],
-    },
-
-    /* Path for storing compatibility assets. */
-    legacy: {
-        assets: "assets/legacy/assets/*",
-        stylesheets: "assets/legacy/stylesheets/**/*.css",
-        javascripts: "assets/legacy/javascripts/**/*.js",
+        stylesheets: {
+            base: "assets/stylesheets",
+            glob: "assets/stylesheets/**/*.css",
+            entry: "assets/stylesheets/app.css",
+        },
+        javascripts: {
+            base: "assets/javascripts",
+            glob: "assets/javascripts/**/*.ts",
+            entry: "assets/javascripts/app.ts",
+        },
     },
 
     /* Path to output compiled assets to. */
@@ -67,79 +52,118 @@ function logError(error) {
 }
 
 /* Assets
- * ---------------------------------------------------------------------- */
+ * ----------------------------------------------------------------------------------- */
 
 gulp.task("assets", function() {
-    return es
-        .merge([
-            gulp.src(paths.app.assets),
-            gulp.src(paths.admin.assets),
-            gulp.src(paths.vendor.assets),
-            gulp.src(paths.legacy.assets),
-        ])
-        .pipe(gulp.dest(paths.dest));
+    return es.merge([gulp.src(paths.app.assets.entries)]).pipe(gulp.dest(paths.dest));
 });
 
 /* Stylesheets
- * ---------------------------------------------------------------------- */
+ * ----------------------------------------------------------------------------------- */
 
-var postcssProcessors = [
-    require("autoprefixer"),
-    require("postcss-round-subpixels"),
-    require("css-mqpacker"),
-    require("postcss-urlrev")({
-        relativePath: paths.dest,
-        replacer: function(url, hash) {
-            /* PostCSS-Urlrev uses ?v= by default. Override to
-             * make it compatible with ?h= syntax in app. */
-            return url + "?h=" + hash.slice(0, 8);
-        },
-    }),
-    require("cssnano")({ preset: "default" }),
-];
+var pc = require("postcss");
+var spriteUpdateRule = require("postcss-sprites/lib/core").updateRule;
 
 gulp.task("styles/app", ["assets"], function() {
     return gulp
-        .src(paths.app.stylesheets)
-        .pipe(sourcemaps.init())
-        .pipe(sass().on("error", sass.logError))
-        .pipe(concat("app.css"))
-        .pipe(postcss(postcssProcessors).on("error", logError))
-        .pipe(sourcemaps.write("."))
+        .src(paths.app.stylesheets.entry)
+        .pipe(
+            postcss([
+                require("postcss-import"),
+                require("postcss-mixins"),
+                require("postcss-nested"),
+                require("lost"),
+                /* Note: allowDuplicates is needed to allow reload to work properly. */
+                require("postcss-normalize")({ allowDuplicates: true }),
+                require("postcss-utilities")({ textHideMethod: "font" }),
+                require("postcss-custom-media"),
+                require("postcss-custom-properties")({ preserve: false }),
+                require("postcss-color-function"),
+                require("postcss-calc"),
+                require("postcss-image-set-polyfill"),
+                require("postcss-url")({
+                    url: function(asset, dir, options, decl, warn, result) {
+                        /* PostCSS-Sprites require absolute path to work with baseDir. */
+                        if (asset.url.match(/^[^/]/)) {
+                            return "/" + asset.url;
+                        }
+                    },
+                }),
+                require("postcss-sprites")({
+                    stylesheetPath: paths.dest,
+                    spritePath: paths.dest,
+                    basePath: paths.app.assets.base,
+                    retina: true,
+                    spritesmith: { padding: 5 },
+                    hooks: {
+                        onUpdateRule: function(rule, token, image) {
+                            spriteUpdateRule(rule, token, image);
+                            rule.insertAfter(
+                                rule.last,
+                                pc.decl({
+                                    prop: "background-repeat",
+                                    value: "no-repeat",
+                                }),
+                            );
+                            ["width", "height"].forEach(function(prop) {
+                                var value = image.coords[prop];
+                                if (image.retina) {
+                                    value /= image.ratio;
+                                }
+                                rule.insertAfter(
+                                    rule.last,
+                                    pc.decl({
+                                        prop: prop,
+                                        value: value + "px",
+                                    }),
+                                );
+                            });
+                        },
+                    },
+                }),
+                require("postcss-round-subpixels"),
+                require("css-mqpacker"),
+                require("postcss-urlrev")({
+                    relativePath: paths.dest,
+                    replacer: function(url, hash) {
+                        /* Override to make it compatible with the app. */
+                        return url + "?h=" + hash.slice(0, 8);
+                    },
+                }),
+                require("autoprefixer"),
+                require("colorguard")({
+                    allowEquivalentNotation: true,
+                    ignore: ["#f2f5f7", "#d7e0e5"],
+                }),
+                require("postcss-discard-unused"),
+                require("postcss-merge-idents"),
+                require("postcss-reduce-idents"),
+                require("postcss-zindex"),
+                require("cssnano")({
+                    preset: [
+                        "default",
+                        {
+                            discardComments: {
+                                removeAll: true,
+                            },
+                        },
+                    ],
+                }),
+            ]).on("error", logError),
+        )
         .pipe(gulp.dest(paths.dest));
 });
 
-gulp.task("styles/admin", ["assets"], function() {
-    return gulp
-        .src(paths.admin.stylesheets)
-        .pipe(sourcemaps.init())
-        .pipe(sass().on("error", sass.logError))
-        .pipe(concat("admin.css"))
-        .pipe(postcss(postcssProcessors).on("error", logError))
-        .pipe(sourcemaps.write("."))
-        .pipe(gulp.dest(paths.dest));
-});
-
-gulp.task("styles/vendor", function() {
-    return gulp
-        .src(paths.vendor.stylesheets)
-        .pipe(sourcemaps.init())
-        .pipe(concat("vendor.css"))
-        .pipe(postcss(postcssProcessors).on("error", logError))
-        .pipe(sourcemaps.write("."))
-        .pipe(gulp.dest(paths.dest));
-});
-
-gulp.task("styles", ["styles/app", "styles/admin", "styles/vendor"]);
+gulp.task("styles", ["styles/app"]);
 
 /* JavaScripts
- * ---------------------------------------------------------------------- */
+ * ----------------------------------------------------------------------------------- */
 
 var externalDependencies = [
     "dom4",
     "domready",
-    "es6-promise",
     "js-cookie",
+    "promise-polyfill",
     "virtual-dom",
 ];
 
@@ -152,9 +176,7 @@ gulp.task("javascripts/app", function() {
         .on("error", logError)
         .pipe(source("app.js"))
         .pipe(buffer())
-        .pipe(sourcemaps.init({ loadMaps: true }))
         .pipe(uglify())
-        .pipe(sourcemaps.write("."))
         .pipe(gulp.dest(paths.dest));
 });
 
@@ -165,39 +187,18 @@ gulp.task("javascripts/vendor", function() {
         .on("error", logError)
         .pipe(source("vendor.js"))
         .pipe(buffer())
-        .pipe(sourcemaps.init({ loadMaps: true }))
         .pipe(uglify())
-        .pipe(sourcemaps.write("."))
         .pipe(gulp.dest(paths.dest));
 });
 
-gulp.task("javascripts/legacy", function() {
-    return gulp
-        .src(paths.legacy.javascripts)
-        .pipe(sourcemaps.init())
-        .pipe(concat("legacy.js"))
-        .pipe(uglify())
-        .pipe(sourcemaps.write("."))
-        .pipe(gulp.dest(paths.dest));
-});
-
-gulp.task("javascripts", [
-    "javascripts/app",
-    "javascripts/vendor",
-    "javascripts/legacy",
-]);
+gulp.task("javascripts", ["javascripts/app", "javascripts/vendor"]);
 
 /* Defaults
- * ---------------------------------------------------------------------- */
+ * ----------------------------------------------------------------------------------- */
 
 gulp.task("default", ["assets", "styles", "javascripts"]);
 
 gulp.task("watch", ["default"], function() {
-    gulp.watch(paths.app.stylesheets, ["styles/app"]);
-    gulp.watch(paths.admin.stylesheets, ["styles/admin"]);
-    gulp.watch(paths.vendor.stylesheets, ["styles/vendor"]);
-
+    gulp.watch(paths.app.stylesheets.glob, ["styles/app"]);
     gulp.watch(paths.app.javascripts.glob, ["javascripts/app"]);
-    gulp.watch(paths.vendor.javascripts, ["javascripts/vendor"]);
-    gulp.watch(paths.legacy.javascripts, ["javascripts/legacy"]);
 });

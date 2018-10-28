@@ -1,0 +1,31 @@
+.theme-topaz {
+    .panel {
+        &--bordered,
+        &--bordered-top {
+            border-color: var(--topaz-gray5);
+        }
+
+        &--shadowed {
+            box-shadow: 0 1px 1px var(--topaz-shadow1);
+        }
+
+        &--inverse {
+            background-color: var(--topaz-gray5);
+            border-color: var(--topaz-white);
+        }
+
+        &--tint {
+            background-color: var(--topaz-gray4);
+            border-color: var(--topaz-white);
+
+            &.panel--shadowed {
+                box-shadow: 0 1px 1px var(--topaz-shadow2);
+            }
+        }
+
+        &--translucent {
+            backdrop-filter: blur(8px);
+            background-color: color(var(--topaz-white) a(86%));
+        }
+    }
+}

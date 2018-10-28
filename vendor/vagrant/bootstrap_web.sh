@@ -14,7 +14,7 @@ pkg update -qf
 PACKAGES="bzip2 ca_root_nss curl git-lite gmake ntp sqlite3 sudo"
 PACKAGES="$PACKAGES memcached postgresql10-server redis"
 PACKAGES="$PACKAGES python36 py36-pip py36-sqlite3 py36-virtualenv"
-PACKAGES="$PACKAGES node8 npm-node8"
+PACKAGES="$PACKAGES node8 npm-node8 phantomjs"
 
 # shellcheck disable=SC2086
 pkg install -qy $PACKAGES
